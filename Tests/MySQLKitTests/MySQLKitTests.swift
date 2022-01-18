@@ -4,6 +4,7 @@ import SQLKitBenchmark
 import XCTest
 import NIOSSL
 import AsyncKit
+import Algorithms
 
 class MySQLKitTests: XCTestCase {
     func testSQLBenchmark() throws {
@@ -46,6 +47,35 @@ class MySQLKitTests: XCTestCase {
 
         let rows = try db.select().columns("*").from("foo").all(decoding: Foo.self).wait()
         XCTAssertEqual(rows, [foo])
+    }
+    
+    func testRecordingPerfStats() throws {
+        struct Foo: Codable {
+            let id: Int
+            let name: String
+//            let notJson: String
+            let jsonIt: [String: [Double]]
+        }
+        let inserts = (1...10000).map { Foo(id: $0, name: "\($0)", /*notJson: (1...2500).map(Double.init).map(String.init(_:)).joined()) }*/ jsonIt: .init(uniqueKeysWithValues: (1...100).map { ("\($0)", (1...25).map(Double.init)) })) }
+        try self.sql.drop(table: "foo").ifExists().run().wait()
+        try self.sql.create(table: "foo")
+            .column("id", type: .bigint, .primaryKey(autoIncrement: false), .notNull)
+            .column("name", type: .text, .notNull)
+//            .column("notJson", type: .custom(SQLRaw("mediumtext")), .notNull)
+            .column("jsonIt", type: .custom(SQLRaw("json")), .notNull)
+            .run().wait()
+        defer { try! self.sql.drop(table: "foo").ifExists().run().wait() }
+        var perfs: [SQLQueryPerformanceRecord] = []
+        for subset in inserts.chunks(ofCount: 250) {
+            try perfs.append(self.sql.insert(into: "foo").models(Array(subset)).runRecordingPerformance().wait())
+        }
+        var totals = perfs.reduce(into: SQLQueryPerformanceRecord()) { $0.aggregate(record: $1) }
+        perfs.first![metric: .serializedQueryText].map { totals.record(value: $0, for: .serializedQueryText) }
+        perfs.first![metric: .fluentBypassFlag].map { totals.record(value: $0, for: .fluentBypassFlag) }
+        let (rows, selPerf) = try self.sql.select().column("*").from("foo").allRecordingPerformance(decoding: Foo.self).wait()
+        
+        self.sql.logger.info("INSERT (all) \(totals.description)")
+        self.sql.logger.info("SELECT (\(rows.count) rows) \(selPerf.description)")
     }
 
     var sql: SQLDatabase {
