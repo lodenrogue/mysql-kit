@@ -75,6 +75,7 @@ extension _MySQLSQLDatabase: SQLDatabase {
                 let rowSql = row.sql(decoder: self.decoder)
                 
                 perfRecord.record(additional: DispatchTime.secondsElapsed(since: rowDecodeStart), for: .outputRowsDecodingDuration)
+                perfRecord.record(additional: 1, for: .returnedResultRowCount)
                 onRow(rowSql)
             }).map {
                 perfRecord.record(DispatchTime.secondsElapsed(since: processingStart), for: .processingDuration)
